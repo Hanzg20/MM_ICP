@@ -74,14 +74,3 @@ npm install
 dfx deploy
 ```
 
-## Contributing
-
-We welcome contributions from the community to enhance the Azle Task Management System. If you want to contribute, please follow these steps:
-
-1. **Fork the repository to your own account.
-2. Create a new branch for your feature or bug fix.
-3. Make your changes and ensure all tests pass.
-4. Submit a pull request for review.
-
-Thank you for considering contributing to our project. Your contributions help make this system better for everyone.
-
