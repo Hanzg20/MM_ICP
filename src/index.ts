@@ -1,292 +1,188 @@
-import { $query, $update, Record, StableBTreeMap, Vec, match, Result, nat64, ic, Opt, Principal} from 'azle';
+import { Canister, query, text, update, Void } from 'azle';
+import { $query, $update, Record, StableBTreeMap, Vec, match, Result, nat64, ic, Opt, Principal } from 'azle';
 import { v4 as uuidv4 } from 'uuid';
+// This is a global variable that is stored on the heap
+let message = '';
 
-type Task = Record<{
+type Membership = Record<{
     creator: Principal;
     id: string;
-    title: string;
-    description: string;
-    created_date: nat64;
-    updated_at: Opt<nat64>;
-    due_date: string;
-    assigned_to: string;
-    tags: Vec<string>;
-    status: string;
-    priority: string; // Added for Task Priority
-    comments: Vec<string>; // Added for Task Comments
-}>;
-type TaskPayload = Record<{
-    title: string;
-    description: string;
-    assigned_to: string;
-    due_date: string;
+    merchantName: string;
+    registrationDate: nat64;
+    expirationDate: nat64;
+    members: Vec<Principal>; // List of members associated with the merchant
+    benefits: Vec<string>; // Membership benefits
+    status: string; // Status of the membership (Active, Expired, etc.)
 }>;
 
-const taskStorage = new StableBTreeMap<string, Task>(0, 44, 512);
+type MembershipPayload = Record<{
+    merchantName: string;
+    expirationDate: string;
+    benefits: Vec<string>;
+}>;
 
-// Number of Tasks to load initially
+const membershipStorage = new StableBTreeMap<string, Membership>(0, 44, 512);
+
+// Number of Memberships to load initially
 const initialLoadSize = 4;
 
-// Load the Initial batch of Tasks
+// Load the Initial batch of Memberships
 $query
-export function getInitialTasks(): Result<Vec<Task>, string> {
-    const initialTasks = taskStorage.values().slice(0, initialLoadSize);
-    return Result.Ok(initialTasks);
+export function getInitialMemberships(): Result<Vec<Membership>, string> {
+    const initialMemberships = membershipStorage.values().slice(0, initialLoadSize);
+    return Result.Ok(initialMemberships);
 }
 
-// Load more Tasks as the user scrolls down
+// Load more Memberships as needed
 $query
-export function loadMoreTasks(offset: number, limit: number): Result<Vec<Task>, string> {
-    const moreTasks = taskStorage.values().slice(offset, offset + limit);
-    return Result.Ok(moreTasks);
+export function loadMoreMemberships(offset: number, limit: number): Result<Vec<Membership>, string> {
+    const moreMemberships = membershipStorage.values().slice(offset, offset + limit);
+    return Result.Ok(moreMemberships);
 }
 
-// Loading a Specific note
+// Get Membership by ID
 $query
-export function getTask(id: string): Result<Task, string> {
-    return match(taskStorage.get(id), {
-        Some: (task) => {
-            if (task.creator.toString() !== ic.caller().toString()) {
-                return Result.Err<Task, string>('You are not authorized to access Task');
+export function getMembership(id: string): Result<Membership, string> {
+    return match(membershipStorage.get(id), {
+        Some: (membership) => {
+            if (membership.creator.toString() !== ic.caller().toString()) {
+                return Result.Err<Membership, string>('You are not authorized to access this Membership');
             }
-            return Result.Ok<Task, string>(task);
+            return Result.Ok<Membership, string>(membership);
         },
-        None: () => Result.Err<Task, string>(`Task with id:${id} not found`),
+        None: () => Result.Err<Membership, string>(`Membership with id:${id} not found`),
     });
 }
 
-// Get Task available by Tags
+// Get Memberships by Status (Active, Expired, etc.)
 $query
-export function getTaskByTags(tag: string): Result<Vec<Task>, string> {
-    const relatedTask = taskStorage.values().filter((task) => task.tags.includes(tag));
-    return Result.Ok(relatedTask);
+export function getMembershipsByStatus(status: string): Result<Vec<Membership>, string> {
+    const membershipsByStatus = membershipStorage.values().filter((membership) => membership.status === status);
+    return Result.Ok(membershipsByStatus);
 }
 
-// Search Task
-$query
-export function searchTasks(searchInput: string): Result<Vec<Task>, string> {
-    const lowerCaseSearchInput = searchInput.toLowerCase();
-    try {
-        const searchedTask = taskStorage.values().filter(
-            (task) =>
-                task.title.toLowerCase().includes(lowerCaseSearchInput) ||
-                task.description.toLowerCase().includes(lowerCaseSearchInput)
-        );
-        return Result.Ok(searchedTask);
-    } catch (err) {
-        return Result.Err('Error finding the task');
-    }
-}
-
-// Allows Assigned user to approve having completed task
+// Create a new Membership
 $update
-export function completedTask(id: string): Result<Task, string> {
-    return match(taskStorage.get(id), {
-        Some: (task) => {
-            if (!task.assigned_to) {
-                return Result.Err<Task, string>('No one was assigned the task');
-            }
-            const completeTask: Task = { ...task, status: 'Completed' };
-            taskStorage.insert(task.id, completeTask);
-            return Result.Ok<Task, string>(completeTask);
-        },
-        None: () => Result.Err<Task, string>(`Task with id:${id} not found`),
-    });
-}
-
-// Allows a group/Organisation to add a Task
-$update
-export function addTask(payload: TaskPayload): Result<Task, string> {
+export function createMembership(payload: MembershipPayload): Result<Membership, string> {
     // Validate input data
-    if (!payload.title || !payload.description || !payload.assigned_to || !payload.due_date) {
-        return Result.Err<Task, string>('Missing or invalid input data');
+    if (!payload.merchantName || !payload.expirationDate) {
+        return Result.Err<Membership, string>('Missing or invalid input data');
     }
 
     try {
-        const newTask: Task = {
+        const newMembership: Membership = {
             creator: ic.caller(),
             id: uuidv4(),
-            created_date: ic.time(),
-            updated_at: Opt.None,
-            tags: [],
-            status: 'In Progress',
-            priority: "",
-            comments: [],
-            ...payload
+            registrationDate: ic.time(),
+            members: Vec.fromArray([ic.caller()]), // The creator is automatically added as a member
+            status: 'Active', // Assuming new memberships are active by default
+            ...payload,
         };
-        taskStorage.insert(newTask.id, newTask);
-        return Result.Ok<Task, string>(newTask);
+        membershipStorage.insert(newMembership.id, newMembership);
+        return Result.Ok<Membership, string>(newMembership);
     } catch (err) {
-        return Result.Err<Task, string>('Issue encountered when Creating Task');
+        return Result.Err<Membership, string>('Issue encountered when creating Membership');
     }
 }
 
-// Adding Tags to the Task created
-$update
-export function addTags(id: string, tags: Vec<string>): Result<Task, string> {
-    // Validate input data
-    if (!tags || tags.length === 0) {
-        return Result.Err<Task, string>('Invalid tags');
-    }
-
-    return match(taskStorage.get(id), {
-        Some: (task) => {
-            if (task.creator.toString() !== ic.caller().toString()) {
-                return Result.Err<Task, string>('You are not authorized to access Task');
+// Add a member to an existing Membership
+@update
+export function addMember(id: string, member: Principal): Result<Membership, string> {
+    return match(membershipStorage.get(id), {
+        Some: (membership) => {
+            if (membership.creator.toString() !== ic.caller().toString()) {
+                return Result.Err<Membership, string>('You are not authorized to add a member');
             }
-            const updatedTask: Task = { ...task, tags: [...task.tags, ...tags], updated_at: Opt.Some(ic.time()) };
-            taskStorage.insert(task.id, updatedTask);
-            return Result.Ok<Task, string>(updatedTask);
+            const updatedMembers = [...membership.members.toArray(), member];
+            const updatedMembership: Membership = { ...membership, members: Vec.fromArray(updatedMembers) };
+            membershipStorage.insert(membership.id, updatedMembership);
+            return Result.Ok<Membership, string>(updatedMembership);
         },
-        None: () => Result.Err<Task, string>(`Task with id:${id} not found`),
+        None: () => Result.Err<Membership, string>(`Membership with id:${id} not found`),
     });
 }
 
-// Giving capability for the creator to be able to Modify task
-$update
-export function updateTask(id: string, payload: TaskPayload): Result<Task, string> {
-    return match(taskStorage.get(id), {
-        Some: (task) => {
-            // Authorization Check
-            if (task.creator.toString() !== ic.caller().toString()) {
-                return Result.Err<Task, string>('You are not authorized to access Task');
+// Extend Membership Expiration Date
+@update
+export function extendMembership(id: string, newExpirationDate: string): Result<Membership, string> {
+    return match(membershipStorage.get(id), {
+        Some: (membership) => {
+            if (membership.creator.toString() !== ic.caller().toString()) {
+                return Result.Err<Membership, string>('You are not authorized to extend the membership');
             }
-            const updatedTask: Task = { ...task, ...payload, updated_at: Opt.Some(ic.time()) };
-            taskStorage.insert(task.id, updatedTask);
-            return Result.Ok<Task, string>(updatedTask);
+            const updatedMembership: Membership = { ...membership, expirationDate: newExpirationDate };
+            membershipStorage.insert(membership.id, updatedMembership);
+            return Result.Ok<Membership, string>(updatedMembership);
         },
-        None: () => Result.Err<Task, string>(`Task with id:${id} not found`),
+        None: () => Result.Err<Membership, string>(`Membership with id:${id} not found`),
     });
 }
 
-// Creator can Delete a task
-$update
-export function deleteTask(id: string): Result<Task, string> {
-    return match(taskStorage.get(id), {
-        Some: (task) => {
-            // Authorization Check
-            if (task.creator.toString() !== ic.caller().toString()) {
-                return Result.Err<Task, string>('You are not authorized to access Task');
+// Deactivate Membership
+@update
+export function deactivateMembership(id: string): Result<Membership, string> {
+    return match(membershipStorage.get(id), {
+        Some: (membership) => {
+            if (membership.creator.toString() !== ic.caller().toString()) {
+                return Result.Err<Membership, string>('You are not authorized to deactivate the membership');
             }
-            taskStorage.remove(id);
-            return Result.Ok<Task, string>(task);
+            const updatedMembership: Membership = { ...membership, status: 'Inactive' };
+            membershipStorage.insert(membership.id, updatedMembership);
+            return Result.Ok<Membership, string>(updatedMembership);
         },
-        None: () => Result.Err<Task, string>(`Task with id:${id} not found, could not be deleted`),
+        None: () => Result.Err<Membership, string>(`Membership with id:${id} not found`),
     });
 }
 
-// Assign a Task to a User
-$update
-export function assignTask(id: string, assignedTo: string): Result<Task, string> {
-    return match(taskStorage.get(id), {
-        Some: (task) => {
-            if (task.creator.toString() !== ic.caller().toString()) {
-                return Result.Err<Task, string>('You are not authorized to assign a task');
+// Update Membership Benefits
+@update
+export function updateMembershipBenefits(id: string, benefits: Vec<string>): Result<Membership, string> {
+    return match(membershipStorage.get(id), {
+        Some: (membership) => {
+            if (membership.creator.toString() !== ic.caller().toString()) {
+                return Result.Err<Membership, string>('You are not authorized to update benefits');
             }
-            const updatedTask: Task = { ...task, assigned_to: assignedTo };
-            taskStorage.insert(task.id, updatedTask);
-            return Result.Ok<Task, string>(updatedTask);
+            const updatedMembership: Membership = { ...membership, benefits };
+            membershipStorage.insert(membership.id, updatedMembership);
+            return Result.Ok<Membership, string>(updatedMembership);
         },
-        None: () => Result.Err<Task, string>(`Task with id:${id} not found`),
+        None: () => Result.Err<Membership, string>(`Membership with id:${id} not found`),
     });
 }
 
-//Change Task Status
-$update
-export function changeTaskStatus(id: string, newStatus: string): Result<Task, string> {
-    return match(taskStorage.get(id), {
-        Some: (task) => {
-            if (task.creator.toString() !== ic.caller().toString()) {
-                return Result.Err<Task, string>('You are not authorized to change the task status');
-            }
-            const updatedTask: Task = { ...task, status: newStatus };
-            taskStorage.insert(task.id, updatedTask);
-            return Result.Ok<Task, string>(updatedTask);
-        },
-        None: () => Result.Err<Task, string>(`Task with id:${id} not found`),
-    });
-}
-
-// Get Tasks by Status
+// Get Memberships by Creator
 $query
-export function getTasksByStatus(status: string): Result<Vec<Task>, string> {
-    const tasksByStatus = taskStorage.values().filter((task) => task.status === status);
-    return Result.Ok(tasksByStatus);
+export function getMembershipsByCreator(creator: Principal): Result<Vec<Membership>, string> {
+    const creatorMemberships = membershipStorage.values().filter((membership) => membership.creator.toString() === creator.toString());
+    return Result.Ok(creatorMemberships);
 }
 
-// Set Task Priority
-$update
-export function setTaskPriority(id: string, priority: string): Result<Task, string> {
-    return match(taskStorage.get(id), {
-        Some: (task) => {
-            if (task.creator.toString() !== ic.caller().toString()) {
-                return Result.Err<Task, string>('You are not authorized to set task priority');
-            }
-            const updatedTask: Task = { ...task, priority };
-            taskStorage.insert(task.id, updatedTask);
-            return Result.Ok<Task, string>(updatedTask);
-        },
-        None: () => Result.Err<Task, string>(`Task with id:${id} not found`),
-    });
-}
-
-// Task Due Date Reminder
-$update
-export function sendDueDateReminder(id: string): Result<string, string> {
+// Membership Expiry Reminder
+$query
+export function membershipExpiryReminder(id: string): Result<string, string> {
     const now = new Date().toISOString();
-    return match(taskStorage.get(id), {
-        Some: (task) => {
-            if (task.due_date < now && task.status !== 'Completed') {
-                return Result.Ok<string, string>('Task is overdue. Please complete it.');
+    return match(membershipStorage.get(id), {
+        Some: (membership) => {
+            if (membership.expirationDate < now && membership.status !== 'Inactive') {
+                return Result.Ok<string, string>('Membership is expired. Please renew it.');
             } else {
-                return Result.Err<string, string>('Task is not overdue or already completed.');
+                return Result.Err<string, string>('Membership is not expired or already inactive.');
             }
         },
-        None: () => Result.Err<string, string>(`Task with id:${id} not found`),
+        None: () => Result.Err<string, string>(`Membership with id:${id} not found`),
     });
 }
 
-//Get Tasks by Creator
-$query
-export function getTasksByCreator(creator: Principal): Result<Vec<Task>, string> {
-    const creatorTasks = taskStorage.values().filter((task) => task.creator.toString() === creator.toString());
-    return Result.Ok(creatorTasks);
-}
-
-//Get Overdue Tasks
-$query
-export function getOverdueTasks(): Result<Vec<Task>, string> {
-    const now = new Date().toISOString();
-    const overdueTasks = taskStorage.values().filter(
-        (task) => task.due_date < now && task.status !== 'Completed'
-    );
-    return Result.Ok(overdueTasks);
-}
-
-// Task Comments
-$update
-export function addTaskComment(id: string, comment: string): Result<Task, string> {
-    return match(taskStorage.get(id), {
-        Some: (task) => {
-            const updatedComments = [...task.comments, comment];
-            const updatedTask: Task = { ...task, comments: updatedComments };
-            taskStorage.insert(task.id, updatedTask);
-            return Result.Ok<Task, string>(updatedTask);
-        },
-        None: () => Result.Err<Task, string>(`Task with id:${id} not found`),
-    });
-}
+export default Canister({
+    // Query calls complete quickly because they do not go through consensus
+    getMessage: query([], text, () => {
+        return message;
+    }),
+    // Update calls take a few seconds to complete
+    // This is because they persist state changes and go through consensus
+    setMessage: update([text], Void, (newMessage) => {
+        message = newMessage; // This change will be persisted
+    })
+});
 
 // UUID workaround
-globalThis.crypto = {
-    // @ts-ignore
-    getRandomValues: () => {
-        let array = new Uint8Array(32);
-
-        for (let i = 0; i < array.length; i++) {
-            array[i] = Math.floor(Math.random() * 256);
-        }
-
-        return array;
-    },
-};
