@@ -1,12 +1,13 @@
 {
     "canisters": {
-        "Task_Tracking_ICP": {
+        "MM_ICP": {
             "type": "custom",
-            "build": "npx azle Task_Tracking_ICP",
+            "main": "src/index.ts",
+            "build": "npx azle MM_ICP",
             "root": "src",
             "ts": "src/index.ts",
             "candid": "src/index.did",
-            "wasm": ".azle/Task_Tracking_ICP/Task_Tracking_ICP.wasm.gz"
+            "wasm": ".azle/MM_ICP/MM_ICP.wasm.gz"
         }
     }
 }
